@@ -44,14 +44,15 @@ def test_bear_regime_blocks_all() -> None:
     assert result.should_trade is False
 
 
-def test_bear_regime_allows_short() -> None:
-    """Futures-only: BEAR regime allows SHORT positions (profit from downtrend)."""
+def test_bear_regime_blocks_short_spot_only() -> None:
+    """Spot-only mode: BEAR regime blocks SHORT signals (can't short in spot).
+    SHORT signals return should_trade=False with reason='bear_regime_spot_no_short'.
+    """
     sig = _signal("CAKE", Direction.SHORT, 0.60)
     result = decide(sig, _regime(Regime.BEAR))
-    assert result.should_trade is True
-    assert result.direction == Direction.SHORT
-    # Should get a boost for shorting in bear
-    assert result.confidence >= 0.60
+    assert result.should_trade is False
+    assert result.direction == Direction.FLAT
+    assert "no_short" in result.reason
 
 
 def test_neutral_requires_higher_confidence() -> None:

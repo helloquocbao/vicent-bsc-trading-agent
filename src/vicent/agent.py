@@ -26,7 +26,7 @@ from typing import Any
 import structlog
 
 from vicent.config import get_settings
-from vicent.execution.twak import TWAKExecutor, TWAKResult
+from vicent.execution.twak import TWAKExecutor
 from vicent.signals.call_scheduler import CallScheduler
 from vicent.signals.cmc_client import CMCClient, resolve_cmc_id
 from vicent.signals.indicators import compute_intraday
@@ -42,7 +42,6 @@ from vicent.state.ledger import (
 )
 from vicent.state.price_history import (
     get_ohlcv_series,
-    get_price_series,
     init_price_history,
     record_prices,
 )
@@ -65,9 +64,7 @@ log = structlog.get_logger(__name__)
 # ============================================================
 # SPOT-ONLY MODE — capital allocation model
 # ============================================================
-_SPOT_MIN_CONFIDENCE   = 0.55
-_SPOT_MAX_POSITIONS    = 3      # Maximum 3 concurrent token holdings
-_SPOT_SLOT_PCT         = 0.20   # 20% NAV per position
+_SPOT_MAX_POSITIONS = 3      # Maximum 3 concurrent token holdings
 
 
 class VICENTAgent:
@@ -88,7 +85,9 @@ class VICENTAgent:
         # Reflexion state
         self._min_confidence: float = 0.50
         self._closed_trade_pnls: list[float] = []
-        
+        # _entry_meta stores {symbol: {sub_scores, confidence, regime, direction}}
+        # so _execute_sell can pass it to ReflexionEngine.process_closed_trade()
+        self._entry_meta: dict[str, dict] = {}
         # Cached market-wide data (refreshed every iteration)
         self._marketcap_ta: dict = {}
         self._narratives: list = []
@@ -100,7 +99,6 @@ class VICENTAgent:
         self._scheduler = CallScheduler()
         
         self._reflexion = ReflexionEngine()
-        self._entry_meta: dict[str, dict] = {}  # key="{symbol}_{direction}"
         self._defense_posture = None
 
     async def run(self) -> None:
@@ -227,7 +225,16 @@ class VICENTAgent:
 
         # --- DEFENSE LAYER ---
         from vicent.strategy.defense import assess_market_health
-        posture = assess_market_health(signals, fear_greed=regime.fear_greed)
+        # Extract BTC 1h % change from global metrics as crash guard fallback
+        # (used when BTC is not in the scored signals this iteration)
+        try:
+            _btc_price_data = global_metrics.get("data", global_metrics)
+            _btc_pct_1h = float(
+                _btc_price_data.get("btc_dominance_yesterday_percentage_change", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            _btc_pct_1h = 0.0
+        posture = assess_market_health(signals, fear_greed=regime.fear_greed, btc_pct_1h=_btc_pct_1h)
         self._defense_posture = posture
         effective_min_conf = self._min_confidence + posture.min_confidence_add
         effective_max_pos = (
@@ -247,15 +254,19 @@ class VICENTAgent:
         )
 
         # --- Open trades ---
-        opened = len(self.portfolio._positions)
-        
+        _last_action = "skipped"
+        _last_action_symbol = ""
+        _last_action_reason = ""
+
         # DEFENSE: skip entries if market is too dangerous
         if not posture.allow_new_entries:
             log.warning("defense_halt_entries", reason=posture.reason)
             ranked = []
+            _last_action = "blocked"
+            _last_action_reason = f"defense_halt:{posture.reason[:60]}"
 
         for decision in ranked:
-            if opened >= effective_max_pos:
+            if len(self.portfolio._positions) >= effective_max_pos:
                 break
 
             # Only trade if bullish
@@ -263,6 +274,9 @@ class VICENTAgent:
                 continue
 
             if decision.confidence < effective_min_conf:
+                _last_action = "blocked"
+                _last_action_symbol = decision.symbol
+                _last_action_reason = f"low_conf:{decision.confidence:.2f}<{effective_min_conf:.2f}"
                 continue
 
             # Check duplication
@@ -282,6 +296,9 @@ class VICENTAgent:
             )
 
             if sentiment.verdict in (SentimentVerdict.BLOCK, SentimentVerdict.WAIT):
+                _last_action = "blocked"
+                _last_action_symbol = decision.symbol
+                _last_action_reason = f"sentiment_{sentiment.verdict.value}:{sentiment.summary[:40]}"
                 continue
 
             combined_multiplier = sentiment.multiplier * posture.size_multiplier
@@ -289,7 +306,10 @@ class VICENTAgent:
             # Execute SPOT BUY
             success = await self._execute_buy(decision, prices, signals, combined_multiplier)
             if success:
-                opened += 1
+                _last_action = "traded"
+                _last_action_symbol = decision.symbol
+                _last_action_reason = f"conf:{decision.confidence:.2f} regime:{decision.regime.value}"
+                break  # one new trade per iteration max (re-evaluate next loop)
 
         # --- Minimum trade enforcement ---
         await self._force_minimum_spot_trade(signals, prices)
@@ -329,9 +349,9 @@ class VICENTAgent:
             tradeable_count=len(ranked),
             top_symbol=top_sig.symbol if top_sig else "none",
             top_confidence=top_sig.confidence if top_sig else 0.0,
-            action="traded" if opened > len(self.portfolio._positions) else "skipped",
-            action_symbol="",
-            action_reason="",
+            action=_last_action,
+            action_symbol=_last_action_symbol,
+            action_reason=_last_action_reason,
             intraday_ready=intraday_ready,
             calls_used=est_calls,
         )
@@ -433,6 +453,16 @@ class VICENTAgent:
                     news_map[sym] = res
                     self._cached_news[sym] = res
 
+        whale_map: dict[str, dict] = {}
+        if self._scheduler.should_fetch_whale():
+            whale_tasks = {sym: cmc.get_crypto_metrics(cid) for sym, cid in symbol_to_id.items()}
+            keys = list(whale_tasks.keys())
+            results = await asyncio.gather(*whale_tasks.values(), return_exceptions=True)
+            for sym, res in zip(keys, results):
+                if not isinstance(res, Exception) and isinstance(res, dict):
+                    whale_map[sym] = res
+                    self._cached_whale[sym] = res
+
         # 4. Score each token
         scored: list[TokenSignal] = []
         for sym, cid in symbol_to_id.items():
@@ -440,24 +470,49 @@ class VICENTAgent:
             if price <= 0:
                 continue
 
-            ta = ta_results.get(sym) or self._cached_token_ta.get(sym, {})
-            news = news_map.get(sym) or self._cached_news.get(sym)
-            
-            # Intraday indicator calculation based on SQLite history
+            ta    = ta_results.get(sym) or self._cached_token_ta.get(sym, {})
+            news  = news_map.get(sym)   or self._cached_news.get(sym)
+            whale = whale_map.get(sym)  or self._cached_whale.get(sym)
+
+            # Intraday indicator calculation based on SQLite OHLCV history.
+            # record_prices() writes high=low=close=price so ATR is close-only.
+            # record_candles() (when available) writes real OHLC bars for better accuracy.
             ohlcv = get_ohlcv_series(sym)
-            closes = ohlcv["close"]
-            highs = ohlcv["high"]
-            lows = ohlcv["low"]
+            closes  = ohlcv["close"]
+            highs   = ohlcv["high"]
+            lows    = ohlcv["low"]
             volumes = ohlcv["volume"]
+
+            has_real_hl = (
+                highs and lows
+                and any(h > 0 for h in highs)
+                and any(l > 0 for l in lows)
+                # real OHLC bars have high != close on at least some bars
+                and any(abs(highs[i] - closes[i]) > 1e-9 for i in range(len(closes)))
+            )
 
             intraday = None
             if closes and len(closes) >= 14:
                 intraday = compute_intraday(
                     prices=closes,
                     volumes=volumes if any(v > 0 for v in volumes) else None,
-                    highs=highs if any(h > 0 for h in highs) else None,
-                    lows=lows if any(l > 0 for l in lows) else None,
+                    highs=highs   if has_real_hl else None,
+                    lows=lows     if has_real_hl else None,
                 )
+
+            # Build OHLCV candle list for pattern detection when real data available
+            ohlcv_candles = None
+            if has_real_hl and len(closes) >= 4:
+                ohlcv_candles = [
+                    {
+                        "o": ohlcv["open"][i],
+                        "h": highs[i],
+                        "l": lows[i],
+                        "c": closes[i],
+                        "v": volumes[i],
+                    }
+                    for i in range(len(closes))
+                ]
 
             try:
                 sig = score_token(
@@ -466,9 +521,10 @@ class VICENTAgent:
                     quotes=quotes,
                     ta=ta,
                     news_articles=news,
-                    whale_metrics=None,
+                    whale_metrics=whale,
                     intraday=intraday,
                     price_series=closes,
+                    ohlcv_candles=ohlcv_candles,
                 )
                 scored.append(sig)
             except Exception as e:
@@ -504,8 +560,14 @@ class VICENTAgent:
             return False
 
         nav_fraction = round(size.nav_fraction * sentiment_multiplier, 4)
-        nav_fraction = max(0.05, min(nav_fraction, self.cfg.risk_per_trade_nav_pct))
+        # Cap at per-trade max but do NOT apply a percentage floor — doing so
+        # defeats the defense layer (0.4x) and drawdown-aware scaling from risk.py.
+        # Instead use a $5 USD minimum to skip dust trades only.
+        nav_fraction = min(nav_fraction, self.cfg.risk_per_trade_nav_pct)
         trade_usd = self.portfolio.nav_usd() * nav_fraction
+        if trade_usd < 5.0:
+            log.debug("trade_skipped_dust", symbol=symbol, trade_usd=round(trade_usd, 2))
+            return False
 
         ok, corr_reason = correlation_check(self.portfolio, symbol, trade_usd)
         if not ok:
@@ -540,6 +602,13 @@ class VICENTAgent:
             confidence=decision.confidence,
             regime=decision.regime.value,
         )
+        # Store entry metadata for Reflexion autopsy on close
+        self._entry_meta[symbol] = {
+            "sub_scores": sig.sub_scores,
+            "confidence": decision.confidence,
+            "regime": decision.regime.value,
+            "direction": "long",
+        }
         return True
 
     async def _execute_sell(
@@ -572,6 +641,7 @@ class VICENTAgent:
                 price = res.fill_price
 
         entry_price = pos.avg_cost_usd
+        entry_meta = self._entry_meta.get(symbol, {})
         proceeds = self.portfolio.close_position(symbol, price, fraction=fraction)
         pnl_pct = (price - entry_price) / entry_price if entry_price > 0 else 0.0
 
@@ -591,6 +661,21 @@ class VICENTAgent:
             self._closed_trade_pnls.append(pnl_pct)
             if len(self._closed_trade_pnls) > 10:
                 self._closed_trade_pnls.pop(0)
+            # --- Reflexion autopsy: learn from this closed trade ---
+            if entry_meta:
+                try:
+                    self._reflexion.process_closed_trade(
+                        symbol=symbol,
+                        direction=entry_meta.get("direction", "long"),
+                        pnl_pct=pnl_pct,
+                        confidence_at_entry=entry_meta.get("confidence", confidence),
+                        sub_scores=entry_meta.get("sub_scores", {}),
+                        regime=entry_meta.get("regime", "unknown"),
+                    )
+                except Exception as rfx_err:
+                    log.warning("reflexion_autopsy_error", symbol=symbol, error=str(rfx_err))
+            # Clean up entry metadata after full close
+            self._entry_meta.pop(symbol, None)
 
         log.info("sell_executed", symbol=symbol, reason=reason, fraction=fraction, pnl_pct=f"{pnl_pct:.2%}", proceeds=proceeds)
         return True
@@ -649,13 +734,12 @@ class VICENTAgent:
         """Ensure we satisfy the daily trade requirement by making a small trade if needed."""
         # Calculate daily trades from db
         trades_today = get_trades_today()
-        # Find hours remaining until UTC midnight
+        # Calculate fractional hours remaining until UTC midnight
         now = datetime.now(timezone.utc)
-        hours_remaining = 24 - now.hour
+        hours_remaining = 24 - now.hour - now.minute / 60.0
 
         if not self.risk.should_force_min_trade(len(trades_today), hours_remaining):
             return
-
         log.warning("forcing_minimum_spot_trade")
         eligible = [
             s for s in sorted(signals, key=lambda x: x.confidence, reverse=True)
@@ -702,9 +786,23 @@ class VICENTAgent:
                 confidence=sig.confidence,
                 regime="forced_minimum_buy",
             )
+            # Store entry metadata for Reflexion autopsy
+            self._entry_meta[sig.symbol] = {
+                "sub_scores": sig.sub_scores,
+                "confidence": sig.confidence,
+                "regime": "forced_minimum_buy",
+                "direction": "long",
+            }
             log.info("forced_minimum_spot_buy_executed", symbol=sig.symbol, amount=amount_usd)
 
     def _reflexion_step(self) -> None:
+        """Adjust confidence threshold based on recent trade performance.
+
+        This is called every iteration. Heavy per-trade learning (signal bias,
+        autopsy, symbol cooldown) happens inside _execute_sell via
+        self._reflexion.process_closed_trade(). This function handles the
+        global confidence threshold adjustment only.
+        """
         if len(self._closed_trade_pnls) < 3:
             return
 
@@ -716,3 +814,12 @@ class VICENTAgent:
             self._min_confidence = min(0.75, self._min_confidence + 0.03)
         elif win_rate >= 0.65 and avg_pnl > 0.02:
             self._min_confidence = max(0.45, self._min_confidence - 0.02)
+
+        log.info(
+            "reflexion_threshold_updated",
+            min_confidence=round(self._min_confidence, 3),
+            recent_win_rate=round(win_rate, 2),
+            avg_pnl=round(avg_pnl, 4),
+            total_autopsies=self._reflexion.state.total_autopsies,
+            overall_win_rate=round(self._reflexion.state.overall_win_rate, 3),
+        )

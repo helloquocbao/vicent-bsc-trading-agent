@@ -65,9 +65,10 @@ class Settings(BaseSettings):
 
     # --- Server ---
     vicent_server_host: str = Field(default="127.0.0.1")
-    vicent_server_port: int = Field(default=8080)
+    vicent_server_port: int = Field(default=9090)
     log_level: str = Field(default="INFO")
 
+    @field_validator("risk_max_drawdown_pct")
     @classmethod
     def drawdown_cap(cls, v: float) -> float:
         # Hard-cap at 25% — we give ourselves a 5% buffer vs competition's 30%

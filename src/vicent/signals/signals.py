@@ -290,13 +290,21 @@ def score_token(
         weights["momentum"] += gap * 0.55
         weights["rsi"]      += gap * 0.45
 
-    # Apply ADX multiplier to directional sub-scores
+    # Apply ADX multiplier to directional sub-scores.
+    # NEWS and WHALE are sentiment signals (not momentum-based), so they are
+    # NOT scaled by ADX. In sideways markets we cap their weight at 50% of
+    # their assigned weight to prevent sentiment from dominating TA.
     directional_keys = ["roc", "rsi", "stoch_rsi", "macd", "bb", "vwap", "ema", "momentum", "prediction"]
+    sentiment_keys = ["news", "whale"]
     composite = 0.0
     for k, w in weights.items():
         s = scores.get(k, 0.0)
         if k in directional_keys:
             s *= adx_multiplier
+        elif k in sentiment_keys and adx_multiplier < 0.7:
+            # Sideways market (ADX < 15 → multiplier = 0.5): cap sentiment weight
+            # at half to avoid news/whale dominating when TA is muted
+            w = w * 0.5
         composite += s * w
 
     # --- ADAPTIVE STRATEGY: trend-follow vs mean-revert + funding capture ---

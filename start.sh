@@ -42,12 +42,13 @@ if [ -f logs/dashboard.pid ]; then
 fi
 sleep 1
 
-# Start agent in background using python3 -m
-PYTHONPATH=src nohup python3 -m vicent.cli run --mode "$MODE" --interval 300 > logs/agent.log 2>&1 &
+# Start agent in background — interval is read from VICENT_LOOP_INTERVAL_SEC in .env
+# (default 900s = 15 min). Do NOT pass --interval here to respect the .env setting.
+PYTHONPATH=src nohup python3 -m vicent.cli run --mode "$MODE" > logs/agent.log 2>&1 &
 echo $! > logs/agent.pid
 echo "Agent PID: $! (Mode: $MODE)"
 
-# Start dashboard in background using python3 -m  
+# Start dashboard in background
 PYTHONPATH=src nohup python3 -m vicent.cli serve --port "$PORT" > logs/dashboard.log 2>&1 &
 echo $! > logs/dashboard.pid
 echo "Dashboard PID: $!"

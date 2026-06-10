@@ -88,13 +88,24 @@ def test_stoch_rsi_none_when_short() -> None:
 # ---- MACD -------------------------------------------------------------------
 
 def test_macd_bullish_on_uptrend() -> None:
-    label, _ = macd(_rising(50))
-    assert label == "bullish"
+    """MACD is bullish when price accelerates upward (histogram > 0).
+
+    A purely linear series causes MACD to converge → histogram ≈ 0 (neutral).
+    We use an exponentially accelerating series to trigger a clear bullish crossover.
+    """
+    import math
+    prices = [80 + math.exp(i * 0.06) for i in range(50)]
+    label, hist = macd(prices)
+    assert label == "bullish", f"expected bullish, got {label!r} (hist={hist:.4f})"
 
 
 def test_macd_bearish_on_downtrend() -> None:
-    label, _ = macd(_falling(50))
-    assert label == "bearish"
+    """MACD is bearish when price decelerates/falls (histogram < 0)."""
+    import math
+    # Start high then exponentially decay
+    prices = [200 - math.exp(i * 0.06) for i in range(50)]
+    label, hist = macd(prices)
+    assert label == "bearish", f"expected bearish, got {label!r} (hist={hist:.4f})"
 
 
 def test_macd_neutral_when_short() -> None:
@@ -214,7 +225,10 @@ def test_compute_intraday_not_enough_data() -> None:
 
 
 def test_compute_intraday_full_uptrend() -> None:
-    r = compute_intraday(_rising(60, step=0.5))
+    """Uptrend with acceleration so MACD shows bullish histogram."""
+    import math
+    prices = [80 + math.exp(i * 0.06) for i in range(60)]
+    r = compute_intraday(prices)
     assert r.has_enough_data is True
     assert r.rsi is not None and r.rsi > 60
     assert r.macd_signal == "bullish"
@@ -226,7 +240,10 @@ def test_compute_intraday_full_uptrend() -> None:
 
 
 def test_compute_intraday_downtrend() -> None:
-    r = compute_intraday(_falling(60))
+    """Downtrend with deceleration so MACD shows bearish histogram."""
+    import math
+    prices = [200 - math.exp(i * 0.06) for i in range(60)]
+    r = compute_intraday(prices)
     assert r.macd_signal == "bearish"
     assert r.ema_trend == "down"
     assert r.roc_short <= 0
