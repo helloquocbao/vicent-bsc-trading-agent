@@ -2,6 +2,36 @@
 
 > Autonomous AI trading agent on BNB Smart Chain — BNB Hack: AI Trading Agent Edition
 
+---
+
+## 🎯 Vision
+
+### The Problem
+
+Retail crypto traders on BNB Smart Chain face three compounding problems that erode capital over time:
+
+**1. Emotional decision-making under volatility**
+Markets move fast. Most traders either panic-sell during flash crashes or FOMO-buy at local tops. The emotional response to volatility is the single largest source of retail losses — not bad strategy, but inconsistent execution of even a good one.
+
+**2. Signal noise without synthesis**
+There is no shortage of data: Fear & Greed index, RSI, MACD, whale movements, on-chain flows, news sentiment. The problem is that each signal tells a different story depending on the market regime. A bullish RSI in a macro bear market is a trap. Traders lack a unified layer that weighs all signals together and knows *when* each signal is reliable.
+
+**3. No memory — the same mistakes, repeatedly**
+Traditional bots run the same static rules regardless of whether those rules worked last week. There is no feedback loop. A strategy that repeatedly loses in sideways markets will keep losing, because it never learns to reduce confidence in the signals that failed it.
+
+### What VICENT Does Differently
+
+VICENT is built around one core idea: **a trading agent that learns from its own mistakes in real time.**
+
+- **Perceive**: Aggregates CMC macro data, technical indicators, whale flows, and news sentiment into a single scored view per token — no manual signal-checking.
+- **Guard**: A dedicated Market Defense Layer monitors BTC crash signals, market breadth, and volatility spikes. When conditions deteriorate, it automatically scales down position sizes or halts new entries entirely — protecting capital before the damage happens.
+- **Learn**: After every closed trade, the Reflexion Engine runs a post-mortem (autopsy). It identifies which signals predicted correctly, penalizes signals that failed, and progressively raises the confidence threshold in regimes where the agent has been losing. Bad signals get silenced; good signals get amplified.
+- **Execute**: All on-chain swaps are handled through the Trust Wallet Agent Kit CLI, keeping the private key in self-custody — the agent never touches an exchange or a custodial wallet.
+
+The result is an agent that starts cautious, adapts to what the market is actually doing, and gets harder to fool over time.
+
+---
+
 [![Track 1](https://img.shields.io/badge/Track-1%20Autonomous%20Trading-orange)](https://dorahacks.io/hackathon/bnbhack-twt-cmc)
 [![BSC](https://img.shields.io/badge/Chain-BNB%20Smart%20Chain-yellow)](https://bscscan.com)
 [![CMC](https://img.shields.io/badge/Data-CoinMarketCap%20API-blue)](https://coinmarketcap.com/api/agent)
