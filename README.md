@@ -75,8 +75,21 @@ Unlike standard trading bots that rely on static parameters, VICENT is designed 
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
-Ensure you have Python 3.10+ installed:
+### Prerequisites
+Before you begin, make sure you have the following:
+
+| Requirement | Notes |
+|---|---|
+| **Python 3.10+** | Check with `python3 --version` |
+| **Node.js 18+** | Required for the TWAK CLI |
+| **CoinMarketCap API key** | Free tier works for `paper` mode — [get one here](https://coinmarketcap.com/api/) |
+| **EVM wallet private key** | Only required for `--mode live`. Not needed for paper trading. |
+
+> **Note on databases:** VICENT uses SQLite for trade history and price data. The `.db` files are **auto-created on first run** — no manual database setup is required. They are excluded from git (`.gitignore`) intentionally to avoid committing trading history.
+
+---
+
+### 1. Install Python Dependencies
 ```bash
 pip install -e ".[onchain]"
 ```
@@ -93,11 +106,11 @@ Copy the template and fill in your details:
 cp .env.example .env
 ```
 Key configurations inside `.env`:
-- `PRIVATE_KEY`: Your EVM wallet private key.
+- `PRIVATE_KEY`: Your EVM wallet private key *(not needed for paper mode)*.
 - `CMC_API_KEYS`: Comma-separated list of CoinMarketCap API keys (auto-rotated).
 - `VICENT_MODE`: Set to `paper` for simulated trading or `live` for on-chain swaps.
 - `VICENT_SERVER_PORT`: Port for the dashboard (defaults to `9090`).
-- `VICENT_DB_PATH`: Custom path for SQLite databases (defaults to `vicent_spot_trades.db`).
+- `VICENT_DB_PATH`: Path for the SQLite database (defaults to `vicent_spot_trades.db`, auto-created).
 
 ### 4. Running the Agent & Dashboard
 We provide isolated wrapper scripts to control the background processes without conflicting with other local projects (using local PID trackers):

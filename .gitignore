@@ -22,3 +22,6 @@ env/
 .idea/
 .vscode/
 node_modules/
+*.db
+vicent_heartbeat.json
+
