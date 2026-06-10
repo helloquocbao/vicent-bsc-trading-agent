@@ -176,9 +176,9 @@ def trades(limit: int = typer.Option(20, "--limit", "-n")) -> None:
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8080, "--port"),
+    port: int = typer.Option(9090, "--port"),
 ) -> None:
-    """Start the monitoring dashboard server at http://localhost:8080"""
+    """Start the monitoring dashboard server at http://localhost:9090"""
     _setup_logging()
     console.print(f"[bold green]VICENT Dashboard[/bold green] → http://{host}:{port}")
     console.print(f"  Auto-refresh every 10 seconds")

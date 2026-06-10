@@ -67,8 +67,12 @@ _CASCADE_COUNT_DEFENSIVE = 5    # >=5 tokens dumping → defensive
 def assess_market_health(
     signals: list["TokenSignal"],
     fear_greed: int = 50,
+    btc_pct_1h: float = 0.0,
 ) -> DefensePosture:
     """Evaluate market health from all token signals.
+
+    btc_pct_1h: BTC 1h % change from global_metrics — used as fallback when
+    BTC is not in the signals list (e.g. CMC quota exceeded for BTC).
 
     Adjusts trade sizing, confidence thresholds, and decides if entries are allowed.
     """
@@ -103,6 +107,11 @@ def assess_market_health(
     btc_sig = next((s for s in signals if s.symbol == "BTC"), None)
     if btc_sig:
         btc_roc = btc_sig.roc_short
+    elif btc_pct_1h != 0.0:
+        # Fallback: use the 1h % change from CMC global metrics when BTC
+        # was not scored this iteration (quota exhausted, API timeout, etc.)
+        btc_roc = btc_pct_1h
+        log.debug("btc_crash_guard_fallback", source="global_metrics_1h", value=btc_roc)
 
     # --- 4. Momentum cascade: count of dumping tokens ---
     cascade = sum(1 for s in signals if s.roc_short < _CASCADE_ROC_THRESHOLD)

@@ -133,7 +133,9 @@ def rsi(values: list[float], period: int = 14) -> float | None:
         avg_gain = (avg_gain * (period - 1) + max(d, 0)) / period
         avg_loss = (avg_loss * (period - 1) + max(-d, 0)) / period
     if avg_loss == 0:
-        return 100.0
+        # avg_gain > 0 → pure uptrend → 100
+        # avg_gain = 0 → completely flat/stale → 50 (neutral, not overbought)
+        return 100.0 if avg_gain > 0 else 50.0
     return 100.0 - (100.0 / (1 + avg_gain / avg_loss))
 
 
@@ -150,7 +152,7 @@ def rsi_series(values: list[float], period: int = 14) -> list[float]:
     avg_gain = gains / period
     avg_loss = losses / period
     if avg_loss == 0:
-        out.append(100.0)
+        out.append(100.0 if avg_gain > 0 else 50.0)
     else:
         out.append(100.0 - 100.0 / (1 + avg_gain / avg_loss))
     for i in range(period + 1, len(values)):
@@ -158,7 +160,7 @@ def rsi_series(values: list[float], period: int = 14) -> list[float]:
         avg_gain = (avg_gain * (period - 1) + max(d, 0)) / period
         avg_loss = (avg_loss * (period - 1) + max(-d, 0)) / period
         if avg_loss == 0:
-            out.append(100.0)
+            out.append(100.0 if avg_gain > 0 else 50.0)
         else:
             out.append(100.0 - 100.0 / (1 + avg_gain / avg_loss))
     return out
@@ -200,10 +202,13 @@ def macd(values: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -
         return "neutral", 0.0
     mv, sv = macd_line[-1], sig_line[-1]
     hist = mv - sv
-    if mv > 0: return "bullish", hist
-    if mv < 0: return "bearish", hist
-    if hist > 0: return "bullish", hist
-    if hist < 0: return "bearish", hist
+    # Direction is determined by crossover (MACD line vs Signal line),
+    # NOT by whether MACD line is above/below zero.
+    # A rising MACD crossing above signal = bullish regardless of absolute value.
+    if hist > 0:
+        return "bullish", hist
+    if hist < 0:
+        return "bearish", hist
     return "neutral", hist
 
 

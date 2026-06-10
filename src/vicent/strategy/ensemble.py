@@ -39,12 +39,16 @@ def decide(
 ) -> TradeDecision:
     """Core decision function — combine regime + signal → trade/no-trade.
 
+    Spot-only mode: only LONG entries are actionable. SHORT signals are
+    evaluated for regime context (they raise the effective confidence bar
+    and inform defense posture) but do NOT produce executable trades.
+
     min_confidence is set dynamically by the reflexion layer.
     """
 
     # --- Regime gate ---
-    # Futures-only mode: BEAR regime allows SHORT perps (profit from downtrend)
-    # Only hard-block if signal is LONG during BEAR (don't fight the trend)
+    # In a BEAR regime, block all LONG entries — don't fight the trend.
+    # We do NOT short (spot-only), so BEAR → FLAT for all signals.
     if regime.regime == Regime.BEAR:
         if signal.direction == Direction.LONG:
             return TradeDecision(
@@ -55,30 +59,20 @@ def decide(
                 regime=regime.regime,
                 reason="bear_regime_blocks_long",
             )
-        # SHORT signals pass through in BEAR — this is the most profitable case
-        if signal.direction == Direction.SHORT and signal.confidence >= min_confidence:
-            adj_confidence = min(1.0, signal.confidence * 1.20)  # 20% boost for shorting in bear
-            return TradeDecision(
-                should_trade=True,
-                symbol=signal.symbol,
-                direction=Direction.SHORT,
-                confidence=adj_confidence,
-                regime=regime.regime,
-                reason="bear_regime_short_boost",
-            )
+        # SHORT signals in BEAR → mark as informational only (not executable in spot)
         return TradeDecision(
             should_trade=False,
             symbol=signal.symbol,
             direction=Direction.FLAT,
             confidence=0.0,
             regime=regime.regime,
-            reason="bear_regime_flat",
+            reason="bear_regime_spot_no_short",
         )
 
     # Minimum confidence threshold varies by regime AND reflexion feedback
     base_min = min_confidence
     if regime.regime == Regime.NEUTRAL:
-        base_min = max(min_confidence, 0.55)  # futures-only: lower neutral bar
+        base_min = max(min_confidence, 0.55)  # require higher bar in neutral market
 
     if signal.direction == Direction.FLAT or signal.confidence < base_min:
         return TradeDecision(

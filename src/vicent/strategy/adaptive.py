@@ -196,7 +196,11 @@ def apply_adaptive_to_composite(
       TREND:      70% base composite + 30% bias (trend-following dominates)
       MEAN_REVERT: 40% base composite + 60% bias (fade dominates)
       TRANSITION: 60% base + 40% bias
-      NO_TRADE:   return 0
+      NO_TRADE:   return base composite (fall back to pure TA)
+
+    Note: funding_bias is a perps-only concept (funding rate payments on
+    perpetual futures). In spot-only BSC mode it is always 0.0 and has
+    no effect, but the field is retained for forward compatibility.
     """
     if adaptive.mode == StrategyMode.NO_TRADE:
         return base_composite   # fall back to pure TA when no intraday data
@@ -209,7 +213,8 @@ def apply_adaptive_to_composite(
     else:  # TRANSITION
         blended = base_composite * 0.60 + adaptive.directional_bias * 0.40
 
-    # Add funding bias (small market-neutral tilt, max ±0.15 effect)
+    # funding_bias is always 0.0 in spot mode (no perpetual funding).
+    # Kept for structural completeness; no-op when 0.
     blended += adaptive.funding_bias * 0.15
 
     # Apply confidence multiplier

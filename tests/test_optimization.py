@@ -71,10 +71,15 @@ def test_skip_when_edge_below_floor() -> None:
     assert "edge_below" in reason
 
 
-def test_skip_uses_hl_cost_by_default() -> None:
-    # Calibrated by default for Hyperliquid (~0.10%): small edge passes due to low fees
+def test_skip_uses_bsc_cost_by_default() -> None:
+    # Default is now BSC PancakeSwap (~0.55% round-trip).
+    # 0.5% ATR is NOT enough to cover 0.55% BSC fee — should skip.
     skip, _ = should_skip_for_fees(expected_move_pct=0.005, confidence=0.55)
-    assert skip is False   # 0.5% ATR is enough to cover the 0.10% HL fee
+    assert skip is True   # 0.5% ATR insufficient for BSC fees
+
+    # 3% ATR at high confidence should pass BSC fee filter
+    skip2, _ = should_skip_for_fees(expected_move_pct=0.03, confidence=0.80)
+    assert skip2 is False  # 3% ATR easily covers 0.55% BSC fees
 
 
 def test_allow_when_edge_above_floor() -> None:

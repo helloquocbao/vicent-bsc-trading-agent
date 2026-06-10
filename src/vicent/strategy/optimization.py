@@ -96,9 +96,11 @@ def volatility_aware_targets(atr_pct: float) -> ExitTargets:
 # 3. Fee/slippage edge filter
 # ---------------------------------------------------------------------------
 
-# Hyperliquid taker fee: 0.035% per side = 0.07% round-trip
-# Plus estimated 0.03% slippage for small orders → ~0.10% total cost floor
-_ROUND_TRIP_COST_PCT = 0.001   # 0.10% — calibrated for Hyperliquid perps
+# BSC / PancakeSwap V3 fee: 0.25% per side = 0.50% round-trip
+# Plus estimated 0.05% slippage for small orders → ~0.55% total cost floor
+# Note: PancakeSwap V3 has tiers (0.01%, 0.05%, 0.25%, 1%) — 0.25% is the
+# most common tier for mid-cap BEP-20 tokens. BNB/stablecoin pairs use 0.05%.
+_ROUND_TRIP_COST_PCT = 0.0055  # 0.55% — calibrated for BSC PancakeSwap V3
 
 
 def should_skip_for_fees(
@@ -112,8 +114,8 @@ def should_skip_for_fees(
     capture. We require the captured move (= ATR * confidence_factor)
     to exceed round-trip cost by at least 1.5x.
 
-    Calibrated for Hyperliquid perps (0.07% fees + ~0.03% slippage = 0.10%).
-    Pass custom_cost_pct to override (e.g. for backtests or different venues).
+    Calibrated for BSC PancakeSwap V3 (0.25% fee each side + ~0.05% slippage
+    = 0.55% round-trip). Pass custom_cost_pct to override for other venues.
     """
     cost = custom_cost_pct if custom_cost_pct is not None else _ROUND_TRIP_COST_PCT
     expected_capture = expected_move_pct * (0.4 + 0.6 * confidence)
@@ -193,20 +195,6 @@ def sector_exposure(portfolio: "Portfolio") -> dict[Sector, float]:
     return exposure
 
 
-def sector_exposure_perps(perp_positions: list, nav: float) -> dict:
-    """Tính sector exposure từ list HLPosition (perps) thay vì spot portfolio.
-
-    Trả về {Sector: collateral_usd} để kiểm tra concentration.
-    Được gọi từ _try_open_perp trong agent — không dùng portfolio._positions
-    vì futures-only mode không có spot positions.
-    """
-    exposure: dict = {}
-    for pos in perp_positions:
-        sector = get_sector(getattr(pos, "coin", ""))
-        exposure[sector] = exposure.get(sector, 0.0) + getattr(pos, "collateral_usd", 0.0)
-    return exposure
-
-
 def correlation_check(
     portfolio: "Portfolio",
     new_symbol: str,
@@ -214,10 +202,6 @@ def correlation_check(
 ) -> tuple[bool, str]:
     """Return (allowed, reason). Block if adding this trade would push
     sector exposure above the cap.
-
-    Note: In futures-only mode this checks spot portfolio._positions which
-    is always empty. Use sector_exposure_perps() + manual check in _try_open_perp
-    for perps correlation gating.
     """
     nav = portfolio.nav_usd()
     if nav <= 0:
