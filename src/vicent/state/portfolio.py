@@ -197,6 +197,10 @@ class Portfolio:
                     "current_price": pos.current_price_usd,
                     "value_usd": pos.value_usd,
                     "pnl_pct": pos.unrealized_pnl_pct,
+                    "peak_price_usd": pos.peak_price_usd,
+                    "entry_atr_pct": pos.entry_atr_pct,
+                    "scaled_out_t1": pos.scaled_out_t1,
+                    "scaled_out_t2": pos.scaled_out_t2,
                 }
                 for sym, pos in self._positions.items()
             },
@@ -209,8 +213,54 @@ class Portfolio:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
+    def from_snapshot_dict(cls, snapshot_data: dict[str, Any]) -> "Portfolio":
+        """Reconstruct a Portfolio object from a snapshot dictionary."""
+        initial_capital = snapshot_data.get("initial_capital", 100.0)
+        p = cls(initial_capital)
+        p._cash_usd = snapshot_data.get("cash_usd", initial_capital)
+        p._peak_nav = snapshot_data.get("peak_nav", initial_capital)
+        
+        # Restore positions
+        positions_data = snapshot_data.get("positions", {})
+        if isinstance(positions_data, str):
+            try:
+                positions_data = json.loads(positions_data)
+            except Exception:
+                positions_data = {}
+
+        for sym, details in positions_data.items():
+            qty = details.get("qty", 0.0)
+            if qty <= 0:
+                continue
+            avg_cost = details.get("avg_cost", 0.0)
+            current_price = details.get("current_price", avg_cost)
+            peak_price = details.get("peak_price_usd", current_price)
+            entry_atr = details.get("entry_atr_pct", 0.05)
+            t1 = details.get("scaled_out_t1", False)
+            t2 = details.get("scaled_out_t2", False)
+
+            p._positions[sym] = Position(
+                symbol=sym,
+                quantity=qty,
+                avg_cost_usd=avg_cost,
+                current_price_usd=current_price,
+                peak_price_usd=peak_price,
+                entry_atr_pct=entry_atr,
+                scaled_out_t1=t1,
+                scaled_out_t2=t2,
+            )
+        
+        if "last_updated" in snapshot_data:
+            try:
+                p._last_updated = datetime.fromisoformat(snapshot_data["last_updated"])
+            except Exception:
+                pass
+        return p
+
+    @classmethod
     def from_live_equity(cls, equity_usd: float) -> "Portfolio":
         """Reconstruct portfolio from live equity (e.g. Hyperliquid account value)."""
         p = cls(equity_usd)
         p._cash_usd = equity_usd
         return p
+

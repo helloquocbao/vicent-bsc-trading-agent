@@ -139,3 +139,54 @@ def test_ensemble_respects_min_confidence_override() -> None:
     # With default threshold (0.50), this should trade
     result_allowed = decide(sig, regime, min_confidence=0.50)
     assert result_allowed.should_trade is True
+
+
+@pytest.mark.asyncio
+async def test_agent_restores_portfolio_on_startup(tmp_path, monkeypatch) -> None:
+    # 1. Override the database path and mode to a temp file/paper
+    db_file = tmp_path / "test_restore_agent.db"
+    monkeypatch.setenv("VICENT_DB_PATH", str(db_file))
+    monkeypatch.setenv("VICENT_MODE", "paper")
+    
+    # Reload settings to pick up the env var
+    from vicent.config import get_settings, Mode
+    settings = get_settings()
+    settings.vicent_db_path = str(db_file)
+    settings.vicent_mode = Mode.PAPER
+    
+    from vicent.state.ledger import init_db, record_snapshot
+    init_db()
+    
+    # 2. Create a dummy portfolio snapshot
+    p = Portfolio(1500.0)
+    p._cash_usd = 1200.0
+    p.open_position("ETH", quantity=1.0, price_usd=300.0)
+    
+    record_snapshot(
+        nav_usd=p.nav_usd(),
+        peak_nav=p._peak_nav,
+        drawdown=p.current_drawdown(),
+        positions=p.to_json(),
+    )
+    
+    # 3. Initialize agent
+    agent = VICENTAgent(initial_capital_usd=1000.0)
+    agent._running = False
+    
+    class DummyStopException(Exception):
+        pass
+        
+    import unittest.mock as mock
+    with mock.patch("vicent.agent.CMCClient") as mock_cmc:
+        mock_cmc.return_value.__aenter__.side_effect = DummyStopException("stop")
+        try:
+            await agent.run()
+        except DummyStopException:
+            pass
+            
+    # Verify that the agent portfolio was successfully restored from the database snapshot
+    assert agent.portfolio.initial_capital == 1500.0
+    assert agent.portfolio._cash_usd == 900.0
+    assert agent.portfolio.has_position("ETH")
+    assert agent.portfolio.get_position("ETH").quantity == 1.0
+

@@ -78,4 +78,33 @@ def test_position_atr_persisted() -> None:
     assert pos.entry_atr_pct == pytest.approx(0.09)
 
 
+def test_portfolio_serialization_roundtrip() -> None:
+    p = Portfolio(2000.0)
+    p._cash_usd = 1500.0
+    p._peak_nav = 2100.0
+    p.open_position("BTCB", quantity=2.0, price_usd=250.0, atr_pct=0.04)
+    pos = p.get_position("BTCB")
+    assert pos is not None
+    pos.peak_price_usd = 280.0
+    pos.scaled_out_t1 = True
+
+    # Serialize to dict/json and reconstruct
+    serialized = p.to_dict()
+    reconstructed = Portfolio.from_snapshot_dict(serialized)
+
+    assert reconstructed.initial_capital == 2000.0
+    assert reconstructed._cash_usd == 1000.0
+    assert reconstructed._peak_nav == 2100.0
+    
+    pos_recon = reconstructed.get_position("BTCB")
+    assert pos_recon is not None
+    assert pos_recon.quantity == 2.0
+    assert pos_recon.avg_cost_usd == 250.0
+    assert pos_recon.peak_price_usd == 280.0
+    assert pos_recon.entry_atr_pct == 0.04
+    assert pos_recon.scaled_out_t1 is True
+    assert pos_recon.scaled_out_t2 is False
+
+
 import pytest
+

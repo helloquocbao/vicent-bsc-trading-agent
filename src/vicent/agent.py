@@ -113,6 +113,23 @@ class VICENTAgent:
         init_db()
         init_price_history()
 
+        # Restore portfolio state from latest DB snapshot if available
+        from vicent.state.ledger import get_latest_snapshot
+        import json
+        snapshot = get_latest_snapshot()
+        if snapshot and snapshot.get("positions"):
+            try:
+                full_portfolio_data = json.loads(snapshot["positions"])
+                self.portfolio = Portfolio.from_snapshot_dict(full_portfolio_data)
+                log.info(
+                    "portfolio_restored_from_snapshot",
+                    nav=round(self.portfolio.nav_usd(), 2),
+                    cash=round(self.portfolio._cash_usd, 2),
+                    positions=list(self.portfolio._positions.keys()),
+                )
+            except Exception as e:
+                log.error("portfolio_restore_failed", error=str(e))
+
         # Check API budget warning at startup
         budget_warn = self._scheduler.check_budget_warning(self.cfg.vicent_loop_interval_sec)
         if budget_warn:
@@ -148,6 +165,7 @@ class VICENTAgent:
         if self._last_day is None or today != self._last_day:
             self.portfolio.reset_day_start()
             self._last_day = today
+
             log.info("day_reset", date=str(today))
 
         log.info("iteration_start", n=self._iteration, ts=now.isoformat())
@@ -357,8 +375,21 @@ class VICENTAgent:
         try:
             equity = await self.twak.get_equity()
             if equity > 0:
-                self.portfolio = Portfolio.from_live_equity(equity)
-                log.info("live_portfolio_synced", total_usd=round(equity, 2))
+                if len(self.portfolio._positions) > 0:
+                    # Sync cash with live equity minus current positions value
+                    positions_value = sum(p.value_usd for p in self.portfolio._positions.values())
+                    self.portfolio._cash_usd = max(0.0, equity - positions_value)
+                    if equity > self.portfolio.initial_capital:
+                        self.portfolio.initial_capital = equity
+                        self.portfolio._peak_nav = max(self.portfolio._peak_nav, equity)
+                    log.info(
+                        "live_portfolio_synced_with_restored_positions",
+                        total_usd=round(equity, 2),
+                        cash=round(self.portfolio._cash_usd, 2),
+                    )
+                else:
+                    self.portfolio = Portfolio.from_live_equity(equity)
+                    log.info("live_portfolio_synced", total_usd=round(equity, 2))
             else:
                 raise ValueError("TWAK returned 0 balance")
         except Exception as e:
