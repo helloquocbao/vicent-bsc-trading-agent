@@ -4,8 +4,9 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
 # Default configuration
-MODE="paper"  # Default is paper (demo) mode
-PORT="9090"   # Default dashboard port
+MODE="paper"    # Default is paper (demo) mode
+PORT="9090"     # Default dashboard port
+CAPITAL="1000.0" # Default initial capital for paper mode
 
 # Read command line arguments
 while [[ $# -gt 0 ]]; do
@@ -21,8 +22,13 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    -c|--capital)
+      CAPITAL="$2"
+      shift
+      shift
+      ;;
     *)
-      echo "Invalid argument: $1. Usage: ./start.sh [--mode paper|live] [--port PORT_NUMBER]"
+      echo "Invalid argument: $1. Usage: ./start.sh [--mode paper|live] [--port PORT_NUMBER] [--capital INITIAL_CAPITAL]"
       exit 1
       ;;
   esac
@@ -44,9 +50,9 @@ sleep 1
 
 # Start agent in background — interval is read from VICENT_LOOP_INTERVAL_SEC in .env
 # (default 900s = 15 min). Do NOT pass --interval here to respect the .env setting.
-PYTHONPATH=src nohup python3 -m vicent.cli run --mode "$MODE" > logs/agent.log 2>&1 &
+PYTHONPATH=src nohup python3 -m vicent.cli run --mode "$MODE" --capital "$CAPITAL" > logs/agent.log 2>&1 &
 echo $! > logs/agent.pid
-echo "Agent PID: $! (Mode: $MODE)"
+echo "Agent PID: $! (Mode: $MODE, Capital: \$${CAPITAL})"
 
 # Start dashboard in background
 PYTHONPATH=src nohup python3 -m vicent.cli serve --port "$PORT" > logs/dashboard.log 2>&1 &

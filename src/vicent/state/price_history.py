@@ -46,20 +46,6 @@ def init_price_history() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_price_symbol_ts
                 ON price_history (symbol, id);
-
-            CREATE TABLE IF NOT EXISTS paper_perps (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol      TEXT    NOT NULL,
-                direction   TEXT    NOT NULL,
-                collateral_usd REAL NOT NULL,
-                size_usd    REAL    NOT NULL,
-                leverage    REAL    NOT NULL,
-                entry_price REAL    NOT NULL,
-                liq_price   REAL    NOT NULL,
-                peak_pnl_pct REAL   DEFAULT 0,
-                open        INTEGER DEFAULT 1,
-                ts_open     TEXT    NOT NULL
-            );
         """)
         # Migration: add OHLCV columns if database only contains close price
         for col, default in [("high", "0"), ("low", "0"), ("volume", "0"), ("open", "0")]:
