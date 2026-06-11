@@ -225,16 +225,7 @@ class VICENTAgent:
 
         # --- DEFENSE LAYER ---
         from vicent.strategy.defense import assess_market_health
-        # Extract BTC 1h % change from global metrics as crash guard fallback
-        # (used when BTC is not in the scored signals this iteration)
-        try:
-            _btc_price_data = global_metrics.get("data", global_metrics)
-            _btc_pct_1h = float(
-                _btc_price_data.get("btc_dominance_yesterday_percentage_change", 0.0) or 0.0
-            )
-        except (TypeError, ValueError):
-            _btc_pct_1h = 0.0
-        posture = assess_market_health(signals, fear_greed=regime.fear_greed, btc_pct_1h=_btc_pct_1h)
+        posture = assess_market_health(signals, fear_greed=regime.fear_greed)
         self._defense_posture = posture
         effective_min_conf = self._min_confidence + posture.min_confidence_add
         effective_max_pos = (

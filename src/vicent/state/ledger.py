@@ -79,28 +79,7 @@ def init_db() -> None:
                 intraday_ready  INTEGER,  -- 0/1
                 calls_used      INTEGER
             );
-
-            CREATE TABLE IF NOT EXISTS paper_perps (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol      TEXT    NOT NULL,
-                direction   TEXT    NOT NULL,
-                collateral_usd REAL NOT NULL,
-                size_usd    REAL    NOT NULL,
-                size_coin   REAL    DEFAULT 0,
-                leverage    REAL    NOT NULL,
-                entry_price REAL    NOT NULL,
-                liq_price   REAL    NOT NULL,
-                peak_pnl_pct REAL   DEFAULT 0,
-                open        INTEGER DEFAULT 1,
-                ts_open     TEXT    NOT NULL
-            );
         """)
-        # Migration: add size_coin column if missing (for existing databases)
-        try:
-            conn.execute("ALTER TABLE paper_perps ADD COLUMN size_coin REAL DEFAULT 0")
-            conn.commit()
-        except Exception:
-            pass  # column already exists
     log.info("ledger_initialized", path=str(_get_db_path()))
 
 
